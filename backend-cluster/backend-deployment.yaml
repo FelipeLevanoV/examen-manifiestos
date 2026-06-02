@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: freddy-quispe-12-deployment
-  namespace: freddy-quispe-12-namespace
+  name: luis-felipe-09-deployment
+  namespace: luis-felipe-09-namespace
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: freddy-quispe-12-deployment
-  template:
-    metadata:
-      labels:
-        app: freddy-quispe-12-deployment
+      app: luis-felipe-09-deployment
+    template:
+      metadata:
+        labels:
+          app: luis-felipe-09-deployment
     spec:
       containers:
-      - name: freddy-quispe-12-container
-        image: tian11qb/sebastian-webflux-nosql:lastest
+      - name: luis-felipe-09-container
+        image: luisfelipe1432/webflux-nosql
         imagePullPolicy: Always
         ports:
           - containerPort: 8087

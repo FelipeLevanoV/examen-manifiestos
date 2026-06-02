@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend-deployment
-  namespace: freddy-quispe-12-namespace
+  namespace: luis-felipe-09-namespace
   labels:
     app: frontend
 spec:
@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: tian11qb/sebastian-front-react-vite-tailwind:lastest
+          image: luisfelipe1432/frontend-nosql
           imagePullPolicy: Always
           ports:
             - containerPort: 5173  # Ajustado al puerto por defecto de Vite
