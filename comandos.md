@@ -36,8 +36,8 @@ minikube start --driver=docker
 ### Paso 1: Cluster MongoDB (EC2-1)
 
 ```bash
-git clone https://github.com/tian-net/intermedio-manifiestos.git
-cd intermedio-manifiestos
+git clone https://github.com/FelipeLevanoV/examen-manifiestos.git
+cd examen-manifiestos
 git checkout develop
 
 kubectl apply -f mongo-cluster/luis-felipe-09-namespace.yaml
@@ -57,8 +57,8 @@ Antes de desplegar, editar `backend-cluster/backend-deployment.yaml`:
 - Reemplazar `<MONGO_EC2_IP>` con la IP publica de EC2-1
 
 ```bash
-git clone https://github.com/tian-net/intermedio-manifiestos.git
-cd intermedio-manifiestos
+git clone https://github.com/FelipeLevanoV/examen-manifiestos.git
+cd  examen-manifiestos
 git checkout develop
 
 # Editar la IP en backend-deployment.yaml
@@ -85,8 +85,8 @@ Pasos:
 4. Pushear: `docker push luisfelipe1432/frontend-nosql`
 
 ```bash
-git clone [https://github.com/tian-net/intermedio-manifiestos.git](https://github.com/tian-net/intermedio-manifiestos.git)
-cd intermedio-manifiestos
+git clone [https://github.com/FelipeLevanoV/examen-manifiestos.git](https://github.com/FelipeLevanoV/examen-manifiestos.git)
+cd examen-manifiestos
 git checkout develop
 
 kubectl apply -f frontend-cluster/luis-felipe-09-namespace.yaml
