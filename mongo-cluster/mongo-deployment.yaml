@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mongo-deployment
-  namespace: freddy-quispe-12-namespace
+  namespace: luis-felipe-09-namespace
   labels:
     app: mongo
 spec:
