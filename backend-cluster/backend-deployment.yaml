@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: luis-felipe-09-container
-        image: luisfelipe1432/webflux-nosql
+        image: luisfelipe1432/webflux-nosql:latest
         imagePullPolicy: Always
         ports:
           - containerPort: 8087
