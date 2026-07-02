@@ -134,14 +134,16 @@ nohup kubectl port-forward -n luis-felipe-09-namespace service/frontend-service 
 curl -s http://localhost:30080 | head -5
 ```
 
-> Si cambiaste la IP del backend, reconstruir la imagen frontend desde tu PC local:
+> Si cambiaste la IP del backend, actualizar `frontend-deployment.yaml` con la IP publica de EC2-2 y reconstruir:
 > ```bash
 > cd ASE242S4_T05-fe
-> # Editar src/lib/constants.ts con la IP publica de EC2-2
-> docker build -t tian11qb/sebastian-front-react-vite-tailwind:lastest .
-> docker push tian11qb/sebastian-front-react-vite-tailwind:lastest
+> docker build -t luisfelipe1432/frontend-nosql:1.0 .
+> docker push luisfelipe1432/frontend-nosql:1.0
 > kubectl rollout restart deployment/frontend-deployment -n luis-felipe-09-namespace
 > ```
+>
+> **IMPORTANTE:** El backend escucha en puerto `8087`. Verifica que `backend-service.yaml` tenga `targetPort: 8087`.
+> La variable `API_PROXY_TARGET` en `frontend-deployment.yaml` debe apuntar a `http://<IP_PUBLICA_EC2-2>:30001`.
 
 ---
 

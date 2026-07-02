@@ -17,7 +17,10 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: luisfelipe1432/frontend-nosql
+          image: luisfelipe1432/frontend-nosql:1.0
           imagePullPolicy: Always
           ports:
-            - containerPort: 5173  # Ajustado al puerto por defecto de Vite
+            - containerPort: 5173
+          env:
+            - name: API_PROXY_TARGET
+              value: "http://54.221.239.210:30001"
