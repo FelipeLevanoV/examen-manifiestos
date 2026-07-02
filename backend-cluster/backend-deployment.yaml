@@ -8,10 +8,10 @@ spec:
   selector:
     matchLabels:
       app: luis-felipe-09-deployment
-    template:
-      metadata:
-        labels:
-          app: luis-felipe-09-deployment
+  template:
+    metadata:
+      labels:
+        app: luis-felipe-09-deployment
     spec:
       containers:
       - name: luis-felipe-09-container
@@ -23,4 +23,4 @@ spec:
         - name: DATABASE_NAME
           value: "elchino"
         - name: DATABASE_URI
-          value: "mongodb://<MONGO_EC2_IP>:27017/elchino"
+          value: "mongodb://184.72.151.239:27017/elchino"

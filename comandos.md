@@ -1,152 +1,232 @@
-# Despliegue Multi-Cluster - Examen Intermedio
+# Despliegue Multi-Cluster y Monitoreo — Examen Intermedio
 
-Arquitectura: 3 instancias EC2 independientes, cada una con Minikube.
-
-| Cluster | EC2 | Servicio | Puerto Expuesto |
-|---------|-----|----------|----------------|
-| MongoDB | EC2-1 | MongoDB 7-jammy | 27017 |
-| Backend | EC2-2 | Spring Boot (WebFlux) | 30001 |
-| Frontend | EC2-3 | React + Vite + Nginx | 30080 |
-
-Namespace comun: `luis-felipe-09-namespace`
+**Arquitectura:** 4 instancias EC2 independientes, cada una con Minikube.
+**Namespaces:** `luis-felipe-09-namespace` (aplicacion), `monitoreo` (monitoreo)
 
 ---
 
-## 1. Prerequisitos (en cada EC2)
+## Puertos por Servidor (configurar Security Groups ANTES de empezar)
+
+| EC2 | Puertos abiertos | Origen |
+|-----|------------------|--------|
+| **EC2-1** (MongoDB) | 27017, 30092, 9100 | IPs EC2-2, EC2-4 |
+| **EC2-2** (Backend) | 30001, 9100 | 0.0.0.0 (30001), EC2-4 (9100) |
+| **EC2-3** (Frontend) | 30080, 9100 | 0.0.0.0 (30080), EC2-4 (9100) |
+| **EC2-4** (Monitoreo) | 30090, 30300 | 0.0.0.0 |
+
+> Usar IPs privadas (172.31.x.x) para trafico entre EC2 (misma VPC). Exponer a 0.0.0.0 solo los puertos de acceso publico.
+
+---
+
+## BLOQUE 1 — Docker + Minikube + kubectl (correr en EC2-1, EC2-2, EC2-3, EC2-4)
 
 ```bash
-# Ubuntu 24.04 - t3.medium - 20GB EBS
-# Ubuntu 24.04 - t3.medium - 20GB EBS
 sudo apt update && sudo apt install -y docker.io
-sudo usermod -aG docker $USER && newgrp docker
-
-# Minikube
-curl -LO [https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64](https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64)
+sudo usermod -aG docker $USER
+newgrp docker
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
 sudo install minikube-linux-amd64 /usr/local/bin/minikube
-
-# kubectl
-curl -LO "[https://dl.k8s.io/release/$](https://dl.k8s.io/release/$)(curl -L -s [https://dl.k8s.io/release/stable.txt](https://dl.k8s.io/release/stable.txt))/bin/linux/amd64/kubectl"
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
 minikube start --driver=docker
 ```
 
-## 2. Orden de Despliegue
+---
 
-### Paso 1: Cluster MongoDB (EC2-1)
+## BLOQUE 2 — Node Exporter (correr solo en EC2-1, EC2-2, EC2-3)
 
 ```bash
+wget https://github.com/prometheus/node_exporter/releases/download/v1.11.1/node_exporter-1.11.1.linux-amd64.tar.gz
+tar xvfz node_exporter-1.11.1.linux-amd64.tar.gz
+sudo mv node_exporter-1.11.1.linux-amd64/node_exporter /usr/local/bin/
+sudo tee /etc/systemd/system/node_exporter.service > /dev/null << 'EOF'
+[Unit]
+Description=Node Exporter
+After=network.target
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now node_exporter
+curl -s http://localhost:9100/metrics | head -3
+```
+
+---
+
+## BLOQUE 3 — MongoDB + MongoDB Exporter + Seed Data (correr en EC2-1)
+
+Antes de empezar: anota la IP **privada** de EC2-1 (la usarás en el Backend).
+
+```bash
+# 1. Clonar repo
 git clone https://github.com/FelipeLevanoV/examen-manifiestos.git
 cd examen-manifiestos
 git checkout develop
 
+# 2. Desplegar MongoDB
 kubectl apply -f mongo-cluster/luis-felipe-09-namespace.yaml
 kubectl apply -f mongo-cluster/mongo-deployment.yaml
 kubectl apply -f mongo-cluster/mongo-service.yaml
+kubectl apply -f mongo-cluster/mongodb-exporter-service.yaml
+kubectl wait --for=condition=ready pod -l app=mongo -n luis-felipe-09-namespace --timeout=90s
 
-# Exponer MongoDB fuera del cluster (Minikube Docker driver)
-kubectl port-forward -n luis-felipe-09-namespace service/mongo-service 27017:27017 --address 0.0.0.0 &
+# 3. Port-forwards (dejar corriendo en background)
+nohup kubectl port-forward -n luis-felipe-09-namespace service/mongo-service 27017:27017 --address 0.0.0.0 > /dev/null 2>&1 &
+nohup kubectl port-forward -n luis-felipe-09-namespace service/mongodb-exporter-service 30092:9216 --address 0.0.0.0 > /dev/null 2>&1 &
 
-# Anotar IP publica de EC2-1
-curl ifconfig.me  # Anotar esta IP como <MONGO_EC2_IP>
+# 4. Seed data (desde tu PC local, copiar el archivo)
+# scp -i <tu-key.pem> seed_elchino.mongodb ubuntu@<EC2-1_IP>:~/
+# Luego en EC2-1:
+mongosh < seed_elchino.mongodb
+
+# 5. Verificar
+kubectl get pods -n luis-felipe-09-namespace
+curl -s http://localhost:30092/metrics | head -3
 ```
 
-### Paso 2: Cluster Backend (EC2-2)
+---
 
-Antes de desplegar, editar `backend-cluster/backend-deployment.yaml`:
-- Reemplazar `<MONGO_EC2_IP>` con la IP publica de EC2-1
+## BLOQUE 4 — Backend (correr en EC2-2)
+
+Reemplaza `IP_PRIVADA_EC2-1` con la IP privada de EC2-1 (172.31.x.x).
 
 ```bash
-git clone https://github.com/FelipeLevanoV/examen-manifiestos.git
-cd  examen-manifiestos
+git clone https://github.com/tian-net/intermedio-manifiestos.git
+cd intermedio-manifiestos
 git checkout develop
 
-# Editar la IP en backend-deployment.yaml
-sed -i 's/<MONGO_EC2_IP>/REEMPLAZAR_CON_IP_EC2_MONGO/g' backend-cluster/backend-deployment.yaml
+# Reemplazar con IP privada de EC2-1
+sed -i "s/<MONGO_EC2_IP>/IP_PRIVADA_EC2-1/g" backend-cluster/backend-deployment.yaml
 
 kubectl apply -f backend-cluster/luis-felipe-09-namespace.yaml
 kubectl apply -f backend-cluster/backend-deployment.yaml
 kubectl apply -f backend-cluster/backend-service.yaml
+kubectl wait --for=condition=ready pod -l app=luis-felipe-09-deployment -n luis-felipe-09-namespace --timeout=120s
 
-# Exponer Backend
-kubectl port-forward -n luis-felipe-09-namespace service/luis-felipe-09-service 30001:30001 --address 0.0.0.0 &
+nohup kubectl port-forward -n luis-felipe-09-namespace service/luis-felipe-09-service 30001:30001 --address 0.0.0.0 > /dev/null 2>&1 &
 
 # Verificar
-curl http://localhost:30001/api/events
+curl -s http://localhost:30001/actuator/health | head -5
+curl -s http://localhost:30001/actuator/prometheus | head -10
 ```
 
-### Paso 3: Cluster Frontend (EC2-3)
+---
 
-El frontend tiene la URL del backend hardcodeada en el build.
-Pasos:
-1. Clonar `https://github.com/tian-net/ASE242S4_T05-fe.git`
-2. Editar `src/lib/constants.ts` -> `API_BASE = 'http://<EC2_BACKEND_IP>:30001/api'`
-3. Reconstruir imagen: `docker build -t luisfelipe1432/frontend-nosql .`
-4. Pushear: `docker push luisfelipe1432/frontend-nosql`
+## BLOQUE 5 — Frontend (correr en EC2-3)
 
 ```bash
-git clone [https://github.com/FelipeLevanoV/examen-manifiestos.git](https://github.com/FelipeLevanoV/examen-manifiestos.git)
-cd examen-manifiestos
+git clone https://github.com/tian-net/intermedio-manifiestos.git
+cd intermedio-manifiestos
 git checkout develop
 
 kubectl apply -f frontend-cluster/luis-felipe-09-namespace.yaml
 kubectl apply -f frontend-cluster/frontend-deployment.yaml
 kubectl apply -f frontend-cluster/frontend-service.yaml
+kubectl wait --for=condition=ready pod -l app=frontend -n luis-felipe-09-namespace --timeout=120s
 
-# Exponer Frontend en segundo plano
-kubectl port-forward -n luis-felipe-09-namespace service/frontend-service 30080:80 --address 0.0.0.0 &
+nohup kubectl port-forward -n luis-felipe-09-namespace service/frontend-service 30080:80 --address 0.0.0.0 > /dev/null 2>&1 &
+
+# Verificar
+curl -s http://localhost:30080 | head -5
 ```
 
-## 3. Verificacion
+> Si cambiaste la IP del backend, reconstruir la imagen frontend desde tu PC local:
+> ```bash
+> cd ASE242S4_T05-fe
+> # Editar src/lib/constants.ts con la IP publica de EC2-2
+> docker build -t tian11qb/sebastian-front-react-vite-tailwind:lastest .
+> docker push tian11qb/sebastian-front-react-vite-tailwind:lastest
+> kubectl rollout restart deployment/frontend-deployment -n luis-felipe-09-namespace
+> ```
+
+---
+
+## BLOQUE 6 — Prometheus (correr en EC2-4)
+
+Reemplaza las 3 IPs con las IPs **publicas** de EC2-1, EC2-2, EC2-3.
 
 ```bash
-# Estado general
-kubectl get all -n luis-felipe-09-namespace
+cd ~/intermedio-manifiestos
+git checkout develop
 
-# EC2-1: MongoDB
-kubectl logs -n luis-felipe-09-namespace deployment/mongo-deployment
+sed -i "s/<EC2-1_IP>/IP_PUBLICA_EC2-1/g" monitoreo/prometheus/prometheus-config.yaml
+sed -i "s/<EC2-2_IP>/IP_PUBLICA_EC2-2/g" monitoreo/prometheus/prometheus-config.yaml  # para Actuator
+sed -i "s/<EC2-3_IP>/IP_PUBLICA_EC2-3/g" monitoreo/prometheus/prometheus-config.yaml
 
-# EC2-2: Backend (Swagger)
-curl http://localhost:30001/swagger-ui.html
+kubectl apply -f monitoreo/namespace-monitoreo.yaml
+kubectl apply -f monitoreo/prometheus/prometheus-config.yaml
+kubectl apply -f monitoreo/prometheus/prometheus-deployment.yaml
+kubectl apply -f monitoreo/prometheus/prometheus-service.yaml
+kubectl wait --for=condition=ready pod -l app=prometheus -n monitoreo --timeout=60s
 
-# EC2-3: Frontend
-curl http://localhost:30080
+nohup kubectl port-forward -n monitoreo service/prometheus-service 30090:9090 --address 0.0.0.0 > /dev/null 2>&1 &
+
+# Verificar targets (deben aparecer 6 targets UP)
+curl -s http://localhost:30090/api/v1/targets | python3 -m json.tool | grep -E "job|health"
 ```
 
-## 4. Security Groups (AWS)
+---
 
-| EC2 | Puerto | Origen | Descripcion |
-|-----|--------|--------|-------------|
-| EC2-1 (Mongo) | 27017 | IP de EC2-2 | MongoDB desde Backend |
-| EC2-2 (Backend) | 30001 | 0.0.0.0/0 | API REST + Swagger |
-| EC2-3 (Frontend) | 30080 | 0.0.0.0/0 | Frontend React |
-
-## 5. Limpieza
+## BLOQUE 7 — Grafana (correr en EC2-4)
 
 ```bash
+kubectl apply -f monitoreo/grafana/grafana-datasource.yaml
+kubectl apply -f monitoreo/grafana/grafana-dashboard-configmap.yaml
+kubectl apply -f monitoreo/grafana/grafana-deployment.yaml
+kubectl apply -f monitoreo/grafana/grafana-service.yaml
+kubectl wait --for=condition=ready pod -l app=grafana -n monitoreo --timeout=60s
+
+nohup kubectl port-forward -n monitoreo service/grafana-service 30300:3000 --address 0.0.0.0 > /dev/null 2>&1 &
+
+echo "Accede a: http://$(curl -s ifconfig.me):30300  |  admin / admin"
+```
+
+---
+
+## BLOQUE 8 — Verificacion General
+
+```bash
+# Backend API
+curl -s http://<EC2-2_IP>:30001/api/events | head -5
+curl -s http://<EC2-2_IP>:30001/actuator/health
+
+# Frontend
+curl -s http://<EC2-3_IP>:30080 | head -5
+
+# Prometheus targets
+curl -s http://<EC2-4_IP>:30090/targets | python3 -m json.tool | grep -E '"job"|"health"'
+
+# Dashboard
+echo "http://<EC2-4_IP>:30300/d/elchino"
+```
+
+---
+
+## Errores Comunes
+
+| # | Error | Causa | Solucion |
+|---|-------|-------|----------|
+| 1 | `404` al descargar Node Exporter | URL `/latest/download/` sin version | Usar `v1.11.1/node_exporter-1.11.1.linux-amd64.tar.gz` |
+| 2 | Prometheus `CrashLoopBackOff` | `labels` mal indentado en YAML | Eliminar `labels` de la config |
+| 3 | Target MongoDB `DOWN` | Falta port-forward exporter | `kubectl port-forward -n luis-felipe-09-namespace service/mongodb-exporter-service 30092:9216 --address 0.0.0.0` |
+| 4 | Dashboard MongoDB "No data" | Sidecar sin collectors | Usar `--collect-all --compatible-mode` |
+| 5 | Sidecar `unknown flag` | Flags sueltos no existen | Usar solo `--collect-all --compatible-mode` |
+| 6 | Dashboard JVM "No data" | Query con label `job` incorrecto | Usar `application="Elchino"` en vez de `job="backend-actuator"` |
+| 7 | P99 sin datos | WebFlux no genera histogram | Usar promedio: `rate(sum)/rate(count)*1000` |
+| 8 | `git push` rechazado | Cambios remotos no sincronizados | `git pull origin develop` y resolver conflictos |
+| 9 | Minikube warning memoria | t3.small justo para 3072MB | `minikube start --memory=2048mb` (opcional) |
+
+---
+
+## Limpieza
+
+```bash
+kubectl delete namespace luis-felipe-09-namespace
+kubectl delete namespace monitoreo
+sudo fuser -k 30080/tcp 30001/tcp 27017/tcp 30090/tcp 30300/tcp 30092/tcp 9100/tcp 2>/dev/null
 minikube delete --all
-
-# Matar proceso del Frontend (Puerto 30080)
-sudo fuser -k 30080/tcp
-
-# Matar proceso del Backend (Puerto 30001)
-sudo fuser -k 30001/tcp
-
-# Matar proceso de Mongo (Puerto 27017)
-sudo fuser -k 27017/tcp
-
-
-# Forzar reinicio de los pods del Backend
-kubectl rollout restart deployment/luis-felipe-09-deployment -n luis-felipe-09-namespace
-
-# Forzar reinicio de los pods del Frontend
-kubectl rollout restart deployment/frontend-deployment -n luis-felipe-09-namespace
-
-
-
-# 1. Ver los logs internos de la aplicación (Ej. Spring Boot o Vite)
-kubectl logs -n luis-felipe-09-namespace deployment/frontend-deployment
-
-# 2. Ver los eventos de Kubernetes (Ej. errores de falta de memoria o imagen no encontrada)
-kubectl describe pod -l app=frontend -n luis-felipe-09-namespace
 ```
