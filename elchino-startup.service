@@ -1,0 +1,14 @@
+[Unit]
+Description=ELCHINO Restobar - Startup Automático
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/ubuntu/examen-manifiestos/startup-elchino.sh mongo
+RemainAfterExit=yes
+User=ubuntu
+Group=ubuntu
+
+[Install]
+WantedBy=multi-user.target
